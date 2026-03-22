@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPL 2026 — Draft Conductor</title>
+
+<!-- ═══════════════════════════════════════════════════════════
+  STEP 1: Replace the values below with YOUR Firebase config
+  Get them from: console.firebase.google.com
+  → Your Project → Project Settings → General → Your apps → Web
+════════════════════════════════════════════════════════════════ -->
+<script>
+const FIREBASE_CONFIG = {
+  apiKey:            "PASTE_YOUR_API_KEY_HERE",
+  authDomain:        "PASTE_YOUR_AUTH_DOMAIN_HERE",
+  databaseURL:       "PASTE_YOUR_DATABASE_URL_HERE",
+  projectId:         "PASTE_YOUR_PROJECT_ID_HERE",
+  storageBucket:     "PASTE_YOUR_STORAGE_BUCKET_HERE",
+  messagingSenderId: "PASTE_YOUR_SENDER_ID_HERE",
+  appId:             "PASTE_YOUR_APP_ID_HERE"
+};
+
+// ═══════════════════════════════════════════════════════════
+//  STEP 2: Set your admin password below
+//  Admins can make picks, edit teams, import players, reset.
+//  Viewers can only watch — no controls shown.
+// ═══════════════════════════════════════════════════════════
+const ADMIN_PASSWORD = "ipl2026admin";
+</script>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090f;--surface:#13131f;--card:#1c1c2e;--border:rgba(255,255,255,0.09);
+  --plat:#e2e2ef;--gold:#f0a500;--silv:#8fa3b8;--bron:#cd7f32;
+  --green:#22c55e;--red:#ef4444;
+  --text:#eef0f8;--muted:#606880;--sub:#9098b8;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px}
+button{cursor:pointer;font-family:inherit;font-size:13px;border-radius:6px;transition:opacity .15s,background .15s;border:none}
+input,select{font-family:inherit;font-size:13px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--text);padding:6px 10px;outline:none}
+input:focus,select:focus{border-color:var(--gold)}
+code{background:var(--surface);padding:2px 6px;border-radius:4px;color:var(--gold);font-size:12px}
+::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:var(--surface)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+#app{display:flex;flex-direction:column;min-height:100vh}
+#header{background:linear-gradient(135deg,#0d1240,#1a1060);border-bottom:1px solid rgba(240,165,0,0.25);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;position:sticky;top:0;z-index:100}
+#tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0}
+.tab-btn{padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;letter-spacing:0.04em}
+.tab-btn.active{color:var(--gold);border-bottom-color:var(--gold)}
+#content{flex:1;padding:18px 20px;max-width:1200px;margin:0 auto;width:100%}
+
+.hstat{text-align:center}
+.hstat-v{font-size:18px;font-weight:700;color:var(--gold);line-height:1}
+.hstat-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.sync-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px;animation:pulse 2s infinite}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.sh{font-size:15px;font-weight:600;color:var(--text);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+
+#now-picking{border-radius:10px;padding:16px 20px;margin-bottom:16px;display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center}
+.np-label{font-size:10px;color:var(--muted);letter-spacing:0.15em;text-transform:uppercase;margin-bottom:4px}
+.np-team{font-size:22px;font-weight:700;line-height:1.1;margin-bottom:2px}
+.np-owner{font-size:12px;color:var(--muted)}
+
+.tier{display:inline-block;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:600;border:1px solid}
+.tier-lg{font-size:16px;padding:5px 16px}
+.t-PLATINUM{background:rgba(226,226,239,0.1);color:var(--plat);border-color:rgba(226,226,239,0.3)}
+.t-GOLD{background:rgba(240,165,0,0.12);color:var(--gold);border-color:rgba(240,165,0,0.4)}
+.t-SILVER{background:rgba(143,163,184,0.1);color:var(--silv);border-color:rgba(143,163,184,0.3)}
+.t-BRONZE{background:rgba(205,127,50,0.12);color:var(--bron);border-color:rgba(205,127,50,0.35)}
+
+#pool-filters{display:flex;gap:7px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.filter-btn{padding:5px 12px;background:none;border:1px solid var(--border);color:var(--muted);font-weight:600;font-size:11px;letter-spacing:0.08em;border-radius:5px;transition:all .15s}
+.filter-btn.f-PLATINUM.active{color:var(--plat);border-color:var(--plat)}
+.filter-btn.f-GOLD.active{color:var(--gold);border-color:var(--gold)}
+.filter-btn.f-SILVER.active{color:var(--silv);border-color:var(--silv)}
+.filter-btn.f-BRONZE.active{color:var(--bron);border-color:var(--bron)}
+.filter-btn.f-ALL.active{color:var(--text);border-color:var(--sub)}
+
+#player-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:7px;max-height:340px;overflow-y:auto;margin-bottom:12px}
+.pc{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:9px 11px;cursor:pointer;transition:all .15s;position:relative}
+.pc:hover:not(.drafted){border-color:rgba(240,165,0,0.4);background:#1f1f38}
+.pc.drafted{opacity:0.3;cursor:default}
+.pc.selected{border-color:var(--green);background:rgba(34,197,94,0.08)}
+.pc-tier{font-size:10px;font-weight:600;margin-bottom:3px;letter-spacing:0.06em}
+.pc-name{font-size:13px;font-weight:600;color:var(--text);line-height:1.25;margin-bottom:3px}
+.pc-meta{font-size:11px;color:var(--muted)}
+.drafted-tag{position:absolute;top:5px;right:7px;font-size:9px;font-weight:700;color:var(--red);text-transform:uppercase}
+
+#action-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.btn-confirm{padding:9px 22px;background:var(--green);color:#000;font-weight:700;font-size:14px;border-radius:6px}
+.btn-confirm:disabled{background:var(--border);color:var(--muted);cursor:not-allowed}
+.btn-skip{padding:9px 16px;background:none;border:1px solid var(--red);color:var(--red);font-weight:600;border-radius:6px}
+.btn-skip:disabled{opacity:0.4;cursor:not-allowed}
+.btn-undo{padding:9px 16px;background:none;border:1px solid var(--border);color:var(--muted);font-weight:600;border-radius:6px}
+#sel-preview{flex:1;padding:7px 12px;border-radius:6px;font-size:13px;font-weight:600;display:none}
+
+#pick-log{background:var(--surface);border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;padding:6px 8px;margin-top:14px;display:none}
+.log-row{font-family:monospace;font-size:11px;color:var(--muted);padding:2px 5px;border-bottom:1px solid rgba(255,255,255,0.03);line-height:1.6}
+.log-row:first-child{color:var(--text)}
+
+#order-wrap{overflow-x:auto}
+#order-tbl{width:100%;border-collapse:collapse;font-size:11px}
+#order-tbl th{padding:6px 6px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;text-align:center;white-space:nowrap}
+#order-tbl td{padding:4px 4px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:center}
+.pcell{border-radius:5px;padding:3px 5px}
+.pcell-t{font-size:9px;font-weight:700}
+.pcell-n{font-size:10px;color:var(--sub)}
+.pcell-p{font-size:9px;color:var(--green);margin-top:1px}
+.done-cell{opacity:0.4;text-decoration:line-through}
+.cur-cell{outline:2px solid var(--gold);outline-offset:1px;border-radius:6px}
+
+#rosters-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.rc{background:var(--card);border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+.rc-hdr{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
+.rc-col-hdr{display:grid;grid-template-columns:18px 8px 1fr 32px 40px;gap:4px;padding:4px 10px 3px;border-bottom:1px solid rgba(255,255,255,0.06)}
+.rc-col-hdr span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em}
+.rc-row{display:grid;grid-template-columns:18px 8px 1fr 32px 40px;gap:4px;align-items:center;padding:3px 10px;border-bottom:1px solid rgba(255,255,255,0.03)}
+.rc-num{font-size:9px;color:var(--muted);text-align:right}
+.tdot{width:7px;height:7px;border-radius:50%;justify-self:center}
+.rc-name{font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-role{font-size:10px;color:var(--muted);text-align:center}
+.rc-ipl{font-size:10px;font-weight:600;text-align:center;border-radius:3px;padding:1px 4px}
+.rc-empty{font-size:10px;color:var(--border);font-style:italic;grid-column:2/-1}
+.rc-footer{padding:5px 12px;background:rgba(255,255,255,0.02);border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap}
+
+.teams-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:9px;margin-bottom:22px}
+.tc-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.import-zone{border:2px dashed var(--border);border-radius:8px;padding:22px;text-align:center;cursor:pointer;transition:border-color .2s}
+.import-zone:hover,.import-zone.dragover{border-color:var(--gold);background:rgba(240,165,0,0.04)}
+.ptag{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;background:var(--card);border:1px solid var(--border);border-radius:4px;font-size:11px;margin:2px}
+.ptag-x{background:none;border:none;color:var(--red);font-size:14px;padding:0 1px;line-height:1;cursor:pointer}
+
+.step-card{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--border)}
+.step-num{width:32px;height:32px;border-radius:50%;background:rgba(240,165,0,0.15);border:2px solid var(--gold);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--gold);flex-shrink:0;margin-top:2px}
+.step-body h4{font-size:14px;font-weight:600;margin-bottom:4px}
+.step-body p{font-size:12px;color:var(--muted);line-height:1.75}
+
+#conn-banner{display:none;position:fixed;top:0;left:0;right:0;padding:8px;background:var(--red);color:#fff;text-align:center;font-size:13px;font-weight:600;z-index:9999}
+#toast{position:fixed;bottom:22px;right:22px;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;z-index:9998;transform:translateY(80px);opacity:0;transition:all .3s;pointer-events:none}
+#toast.show{transform:translateY(0);opacity:1}
+
+@media(max-width:600px){
+  #now-picking{grid-template-columns:1fr;gap:10px}
+  #player-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  #content{padding:12px}
+}
+
+/* ── LOGIN OVERLAY ── */
+#login-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:32px 28px;width:100%;max-width:420px;text-align:center}
+.login-logo{font-size:36px;margin-bottom:8px}
+.login-title{font-size:22px;font-weight:700;margin-bottom:4px}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:28px}
+.role-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+.role-btn{padding:18px 12px;border-radius:10px;border:2px solid var(--border);background:var(--surface);cursor:pointer;transition:all .2s;font-family:inherit}
+.role-btn:hover{border-color:var(--gold);background:rgba(240,165,0,0.06)}
+.role-btn.selected{border-color:var(--gold);background:rgba(240,165,0,0.1)}
+.role-btn-icon{font-size:26px;margin-bottom:6px}
+.role-btn-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px}
+.role-btn-desc{font-size:11px;color:var(--muted);line-height:1.4}
+#pw-section{display:none;margin-bottom:18px}
+#pw-section label{display:block;font-size:12px;color:var(--muted);text-align:left;margin-bottom:5px;letter-spacing:0.06em;text-transform:uppercase}
+#pw-input{width:100%;padding:9px 12px;font-size:14px;letter-spacing:0.12em}
+#pw-error{font-size:12px;color:var(--red);margin-top:6px;text-align:left;display:none}
+.login-go{width:100%;padding:11px;background:var(--gold);color:#000;font-size:15px;font-weight:700;border:none;border-radius:8px;cursor:pointer;font-family:inherit;transition:opacity .15s}
+.login-go:hover{opacity:.88}
+.login-go:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── VIEWER BANNER ── */
+#viewer-banner{display:none;background:linear-gradient(90deg,rgba(79,142,247,0.15),rgba(79,142,247,0.05));border-bottom:1px solid rgba(79,142,247,0.3);padding:8px 20px;font-size:12px;color:#93c5fd;text-align:center;letter-spacing:0.04em}
+.admin-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.08em;cursor:pointer}
+.badge-admin{background:rgba(240,165,0,0.15);color:var(--gold);border:1px solid rgba(240,165,0,0.4)}
+.badge-viewer{background:rgba(79,142,247,0.15);color:#93c5fd;border:1px solid rgba(79,142,247,0.3)}
+</style>
+</head>
+<body>
+<div id="conn-banner">Connection lost — reconnecting to Firebase...</div>
+
+<!-- ── LOGIN OVERLAY ── -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div class="login-logo">🏏</div>
+    <div class="login-title">IPL 2026 Draft</div>
+    <div class="login-sub">Choose how you want to join</div>
+
+    <div class="role-btns">
+      <div class="role-btn" id="btn-role-viewer" onclick="selectRole('viewer')">
+        <div class="role-btn-icon">👁️</div>
+        <div class="role-btn-title">Viewer</div>
+        <div class="role-btn-desc">Watch the draft live — no controls</div>
+      </div>
+      <div class="role-btn" id="btn-role-admin" onclick="selectRole('admin')">
+        <div class="role-btn-icon">🎯</div>
+        <div class="role-btn-title">Admin</div>
+        <div class="role-btn-desc">Make picks &amp; manage everything</div>
+      </div>
+    </div>
+
+    <div id="pw-section">
+      <label for="pw-input">Admin password</label>
+      <input id="pw-input" type="password" placeholder="Enter password..." onkeydown="if(event.key==='Enter')submitLogin()">
+      <div id="pw-error">❌ Wrong password. Try again.</div>
+    </div>
+
+    <button class="login-go" id="login-go-btn" onclick="submitLogin()" disabled>Enter Draft →</button>
+  </div>
+</div>
+
+<!-- ── VIEWER BANNER ── -->
+<div id="viewer-banner">👁 Viewer mode — you can watch the draft live but cannot make picks</div>
+
+<div id="app">
+
+  <div id="header">
+    <div>
+      <div style="font-size:17px;font-weight:700">🏏 IPL 2026 — Draft Conductor</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">
+        <span class="sync-dot" id="sync-dot"></span><span id="sync-text">Connecting...</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+      <div class="hstat"><div class="hstat-v" id="h-round">—</div><div class="hstat-l">Round</div></div>
+      <div class="hstat"><div class="hstat-v" id="h-pick">—</div><div class="hstat-l">Pick</div></div>
+      <div class="hstat"><div class="hstat-v" id="h-drafted">0/110</div><div class="hstat-l">Drafted</div></div>
+      <button onclick="loadFromDB()" style="padding:6px 12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:11px">↻ Refresh</button>
+      <div id="role-badge" onclick="logoutRole()" title="Click to switch role"></div>
+    </div>
+  </div>
+
+  <div id="tabs">
+    <button class="tab-btn active" data-tab="live" onclick="switchTab(this)">🎯 Live Draft</button>
+    <button class="tab-btn" data-tab="order" onclick="switchTab(this)">📋 Draft Order</button>
+    <button class="tab-btn" data-tab="rosters" onclick="switchTab(this)">👥 Rosters</button>
+    <button class="tab-btn admin-only" data-tab="setup" onclick="switchTab(this)">⚙️ Setup</button>
+    <button class="tab-btn admin-only" data-tab="guide" onclick="switchTab(this)">📖 Deploy Guide</button>
+  </div>
+
+  <div id="content">
+    <!-- LIVE -->
+    <div id="tab-live" class="tab-panel">
+      <div id="now-picking"></div>
+      <div class="sh">Player pool <span id="pool-avail" style="font-size:12px;color:var(--muted);font-weight:400;margin-left:6px"></span></div>
+      <div id="pool-filters">
+        <button class="filter-btn f-ALL active" onclick="setFilter('ALL')">All tiers</button>
+        <button class="filter-btn f-PLATINUM" onclick="setFilter('PLATINUM')" style="color:var(--plat)">Platinum</button>
+        <button class="filter-btn f-GOLD" onclick="setFilter('GOLD')" style="color:var(--gold)">Gold</button>
+        <button class="filter-btn f-SILVER" onclick="setFilter('SILVER')" style="color:var(--silv)">Silver</button>
+        <button class="filter-btn f-BRONZE" onclick="setFilter('BRONZE')" style="color:var(--bron)">Bronze</button>
+        <input id="search-box" type="text" placeholder="Search player..." style="flex:1;min-width:130px" oninput="renderPool()">
+      </div>
+      <div id="player-grid"></div>
+      <div id="action-bar">
+        <button class="btn-confirm admin-only" id="btn-confirm" onclick="confirmPick()" disabled>✓ Confirm Pick</button>
+        <button class="btn-skip admin-only" id="btn-skip" onclick="skipPick()">✕ Skip</button>
+        <button class="btn-undo admin-only" onclick="undoPick()">↩ Undo</button>
+        <div id="sel-preview"></div>
+        <div id="viewer-pick-note" style="display:none;font-size:12px;color:var(--muted);font-style:italic;padding:8px 0">👁 Watching live — picks appear automatically</div>
+      </div>
+      <div id="pick-log"></div>
+    </div>
+
+    <!-- ORDER -->
+    <div id="tab-order" class="tab-panel" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <span class="tier t-PLATINUM">Platinum</span><span class="tier t-GOLD">Gold</span>
+        <span class="tier t-SILVER">Silver</span><span class="tier t-BRONZE">Bronze</span>
+        <span style="font-size:11px;color:var(--muted);align-self:center">Pattern per round: P·G·S·G·B·P·G·S·G·B &nbsp;|&nbsp; 🟡 current &nbsp;|&nbsp; strikethrough = done</span>
+      </div>
+      <div id="order-wrap"></div>
+    </div>
+
+    <!-- ROSTERS -->
+    <div id="tab-rosters" class="tab-panel" style="display:none">
+      <div id="rosters-grid"></div>
+    </div>
+
+    <!-- SETUP -->
+    <div id="tab-setup" class="tab-panel" style="display:none">
+      <div class="sh">Team names &amp; owners</div>
+      <div class="teams-grid" id="teams-grid"></div>
+
+      <div class="sh">Import player pool from CSV</div>
+      <div class="card">
+        <p style="font-size:12px;color:var(--muted);line-height:1.8;margin-bottom:12px">
+          CSV columns required: <code>name</code>, <code>tier</code>, <code>role</code>, <code>ipl</code><br>
+          Tier values: <code>PLATINUM</code> / <code>GOLD</code> / <code>SILVER</code> / <code>BRONZE</code> &nbsp;·&nbsp; Role: <code>BAT</code> / <code>BWL</code> / <code>AR</code> / <code>WK</code><br>
+          <span style="color:var(--red);font-size:11px">⚠ Import replaces the full player pool. Picks already made are preserved.</span>
+        </p>
+        <div class="import-zone" id="import-zone"
+          ondragover="event.preventDefault();this.classList.add('dragover')"
+          ondragleave="this.classList.remove('dragover')"
+          ondrop="handleDrop(event)"
+          onclick="document.getElementById('csv-input').click()">
+          <div style="font-size:28px;margin-bottom:8px">📂</div>
+          <div style="font-weight:600;margin-bottom:4px">Click to choose CSV — or drag &amp; drop here</div>
+          <div style="font-size:11px;color:var(--muted)">Accepts .csv files</div>
+          <input type="file" id="csv-input" accept=".csv,.txt" style="display:none" onchange="handleFileInput(this)">
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button onclick="downloadTemplate()" style="padding:7px 16px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:600;font-size:12px">↓ Download CSV template</button>
+          <span style="font-size:11px;color:var(--muted)">Fill it in and import back</span>
+        </div>
+      </div>
+
+      <div class="sh">Add single player</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <input id="np-name" placeholder="Player name" style="flex:2;min-width:130px">
+          <select id="np-tier" style="flex:1;min-width:100px">
+            <option value="PLATINUM">Platinum</option><option value="GOLD" selected>Gold</option>
+            <option value="SILVER">Silver</option><option value="BRONZE">Bronze</option>
+          </select>
+          <select id="np-role" style="min-width:70px">
+            <option>BAT</option><option>BWL</option><option>AR</option><option>WK</option>
+          </select>
+          <input id="np-ipl" placeholder="IPL team" style="width:90px">
+          <button onclick="addPlayer()" style="padding:7px 18px;background:rgba(240,165,0,0.15);border:1px solid rgba(240,165,0,0.4);color:var(--gold);font-weight:700">+ Add</button>
+        </div>
+      </div>
+
+      <div class="sh">Current pool (<span id="pool-count">0</span> players)</div>
+      <div id="pool-list"></div>
+
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="resetDraft()" style="padding:9px 20px;background:none;border:1px solid var(--red);color:var(--red);font-weight:700;border-radius:6px">⚠ Reset Entire Draft</button>
+        <button onclick="exportCSV()" style="padding:9px 20px;background:rgba(240,165,0,0.15);border:1px solid rgba(240,165,0,0.4);color:var(--gold);font-weight:700;border-radius:6px">↓ Export CSV</button>
+      </div>
+      <p style="margin-top:10px;font-size:11px;color:var(--muted)">All changes sync instantly to every viewer via Firebase.</p>
+    </div>
+
+    <!-- DEPLOY GUIDE -->
+    <div id="tab-guide" class="tab-panel" style="display:none">
+      <div class="sh">How to deploy as a live website (free)</div>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>Create a free Firebase project</h4>
+          <p>Go to <strong style="color:var(--gold)">console.firebase.google.com</strong> → Add project → name it <em>ipl-draft-2026</em> → disable Google Analytics → Create project.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>Enable Realtime Database</h4>
+          <p>Sidebar → Build → Realtime Database → Create database → choose a region → Start in <strong style="color:var(--red)">test mode</strong>. This allows read/write for 30 days — more than enough for your draft.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h4>Get your Firebase config</h4>
+          <p>Project Settings (gear icon, top-left) → General → scroll to "Your apps" → click the web icon <code>&lt;/&gt;</code> → Register app → copy the <code>firebaseConfig</code> object shown.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <h4>Paste config into the HTML file</h4>
+          <p>Open <code>IPL2026_Draft_Firebase.html</code> in Notepad++ or VS Code → find the <code>FIREBASE_CONFIG</code> block at the very top → replace each <code>PASTE_YOUR_..._HERE</code> with your real values → save the file.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <h4>Host on Netlify — 2 minutes, free forever</h4>
+          <p>Go to <strong style="color:var(--gold)">netlify.com</strong> → Sign up (free) → Sites → "Add new site" → "Deploy manually" → drag &amp; drop the HTML file into the box → Netlify gives you a URL like <code>amazing-draft-a1b2.netlify.app</code>.<br><br>Share that URL with all 10 team owners. Done!</p>
+        </div>
+      </div>
+      <div class="step-card" style="border:none">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <h4>Alternative: GitHub Pages (also free)</h4>
+          <p>Create a GitHub account → New repository → name it <code>ipl-draft</code> → upload the HTML file renamed to <code>index.html</code> → Settings → Pages → Source: main → Your URL will be <code>yourusername.github.io/ipl-draft</code>.</p>
+        </div>
+      </div>
+      <div style="background:rgba(240,165,0,0.08);border:1px solid rgba(240,165,0,0.25);border-radius:8px;padding:14px 16px;margin-top:8px">
+        <div style="font-weight:700;color:var(--gold);margin-bottom:6px">Security note</div>
+        <p style="font-size:12px;color:var(--muted);line-height:1.75">Firebase test mode lets anyone with the URL read/write. For a private league draft this is perfectly fine — only your group knows the link. The 30-day test window will outlast your draft. After that, update the database rules in Firebase console if needed.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const TIER_PATTERN=['PLATINUM','GOLD','SILVER','GOLD','BRONZE','PLATINUM','GOLD','SILVER','GOLD','BRONZE'];
+const TC={PLATINUM:'var(--plat)',GOLD:'var(--gold)',SILVER:'var(--silv)',BRONZE:'var(--bron)'};
+const TB={PLATINUM:'rgba(226,226,239,0.1)',GOLD:'rgba(240,165,0,0.12)',SILVER:'rgba(143,163,184,0.09)',BRONZE:'rgba(205,127,50,0.12)'};
+const TEAM_COLORS=['#4f8ef7','#e8420a','#22c55e','#f0a500','#a855f7','#06b6d4','#ec4899','#84cc16','#f97316','#14b8a6'];
+
+const DEFAULT_TEAMS=[
+  {name:"Mumbai Monarchs",owner:"Owner 1"},{name:"Chennai Challengers",owner:"Owner 2"},
+  {name:"Delhi Dynamos",owner:"Owner 3"},{name:"Kolkata Knights",owner:"Owner 4"},
+  {name:"Bangalore Blasters",owner:"Owner 5"},{name:"Rajasthan Royals XI",owner:"Owner 6"},
+  {name:"Punjab Panthers",owner:"Owner 7"},{name:"Hyderabad Hawks",owner:"Owner 8"},
+  {name:"Gujarat Giants",owner:"Owner 9"},{name:"Lucknow Lions",owner:"Owner 10"},
+];
+
+const DEFAULT_PLAYERS=[
+  {name:"Virat Kohli",tier:"PLATINUM",role:"BAT",ipl:"RCB"},{name:"Rohit Sharma",tier:"PLATINUM",role:"BAT",ipl:"MI"},
+  {name:"Jasprit Bumrah",tier:"PLATINUM",role:"BWL",ipl:"MI"},{name:"MS Dhoni",tier:"PLATINUM",role:"WK",ipl:"CSK"},
+  {name:"Hardik Pandya",tier:"PLATINUM",role:"AR",ipl:"MI"},{name:"Rashid Khan",tier:"PLATINUM",role:"BWL",ipl:"GT"},
+  {name:"Suryakumar Yadav",tier:"PLATINUM",role:"BAT",ipl:"MI"},{name:"Rishabh Pant",tier:"PLATINUM",role:"WK",ipl:"LSG"},
+  {name:"KL Rahul",tier:"PLATINUM",role:"WK",ipl:"LSG"},{name:"Shubman Gill",tier:"PLATINUM",role:"BAT",ipl:"GT"},
+  {name:"Ravindra Jadeja",tier:"PLATINUM",role:"AR",ipl:"CSK"},{name:"Pat Cummins",tier:"PLATINUM",role:"AR",ipl:"SRH"},
+  {name:"Travis Head",tier:"PLATINUM",role:"BAT",ipl:"SRH"},{name:"Jos Buttler",tier:"PLATINUM",role:"BAT",ipl:"RR"},
+  {name:"Yashasvi Jaiswal",tier:"GOLD",role:"BAT",ipl:"RR"},{name:"Ruturaj Gaikwad",tier:"GOLD",role:"BAT",ipl:"CSK"},
+  {name:"Sanju Samson",tier:"GOLD",role:"WK",ipl:"RR"},{name:"Mohammed Shami",tier:"GOLD",role:"BWL",ipl:"GT"},
+  {name:"Axar Patel",tier:"GOLD",role:"AR",ipl:"DC"},{name:"Kagiso Rabada",tier:"GOLD",role:"BWL",ipl:"PBKS"},
+  {name:"Abhishek Sharma",tier:"GOLD",role:"BAT",ipl:"SRH"},{name:"Glenn Maxwell",tier:"GOLD",role:"AR",ipl:"RCB"},
+  {name:"Faf du Plessis",tier:"GOLD",role:"BAT",ipl:"RCB"},{name:"Yuzvendra Chahal",tier:"GOLD",role:"BWL",ipl:"RR"},
+  {name:"Ishan Kishan",tier:"GOLD",role:"WK",ipl:"MI"},{name:"Trent Boult",tier:"GOLD",role:"BWL",ipl:"RR"},
+  {name:"Nitish Kumar Reddy",tier:"GOLD",role:"AR",ipl:"SRH"},{name:"Liam Livingstone",tier:"GOLD",role:"AR",ipl:"PBKS"},
+  {name:"Tilak Varma",tier:"GOLD",role:"BAT",ipl:"MI"},{name:"Kuldeep Yadav",tier:"GOLD",role:"BWL",ipl:"DC"},
+  {name:"Washington Sundar",tier:"SILVER",role:"AR",ipl:"SRH"},{name:"Shardul Thakur",tier:"SILVER",role:"AR",ipl:"KKR"},
+  {name:"Bhuvneshwar Kumar",tier:"SILVER",role:"BWL",ipl:"SRH"},{name:"Arshdeep Singh",tier:"SILVER",role:"BWL",ipl:"PBKS"},
+  {name:"Krunal Pandya",tier:"SILVER",role:"AR",ipl:"LSG"},{name:"Shivam Dube",tier:"SILVER",role:"AR",ipl:"CSK"},
+  {name:"Marcus Stoinis",tier:"SILVER",role:"AR",ipl:"LSG"},{name:"Devon Conway",tier:"SILVER",role:"BAT",ipl:"CSK"},
+  {name:"Varun Chakaravarthy",tier:"SILVER",role:"BWL",ipl:"KKR"},{name:"Heinrich Klaasen",tier:"SILVER",role:"WK",ipl:"SRH"},
+  {name:"Deepak Chahar",tier:"SILVER",role:"BWL",ipl:"CSK"},{name:"Ravi Bishnoi",tier:"SILVER",role:"BWL",ipl:"LSG"},
+  {name:"Prithvi Shaw",tier:"BRONZE",role:"BAT",ipl:"DC"},{name:"Rinku Singh",tier:"BRONZE",role:"BAT",ipl:"KKR"},
+  {name:"Noor Ahmad",tier:"BRONZE",role:"BWL",ipl:"GT"},{name:"Harshal Patel",tier:"BRONZE",role:"BWL",ipl:"PBKS"},
+  {name:"T Natarajan",tier:"BRONZE",role:"BWL",ipl:"SRH"},{name:"Deepak Hooda",tier:"BRONZE",role:"AR",ipl:"LSG"},
+  {name:"Umran Malik",tier:"BRONZE",role:"BWL",ipl:"SRH"},{name:"Ramandeep Singh",tier:"BRONZE",role:"AR",ipl:"KKR"},
+];
+
+let draft=null, selectedIdx=null, tierFilter='ALL', fbReady=false, db=null, draftRef=null;
+
+function defaultDraft(){
+  return{teams:JSON.parse(JSON.stringify(DEFAULT_TEAMS)),players:DEFAULT_PLAYERS.map(p=>({...p,drafted:false})),picks:[],cur:0};
+}
+function getPickInfo(g){const r=Math.floor(g/10),p=g%10;return{round:r,p,teamIdx:(p+r)%10,tier:TIER_PATTERN[p],g};}
+const isDone=()=>draft&&draft.cur>=110;
+
+function initFirebase(){
+  try{
+    if(FIREBASE_CONFIG.apiKey==='PASTE_YOUR_API_KEY_HERE'){
+      document.getElementById('sync-text').textContent='⚠ Firebase not configured — demo mode (not shared)';
+      document.getElementById('sync-text').style.color='var(--gold)';
+      draft=defaultDraft(); renderAll(); return;
+    }
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db=firebase.database();
+    draftRef=db.ref('ipl-draft-2026');
+    db.ref('.info/connected').on('value',snap=>{
+      const ok=snap.val();
+      document.getElementById('conn-banner').style.display=ok?'none':'block';
+      document.getElementById('sync-dot').style.background=ok?'var(--green)':'var(--red)';
+      document.getElementById('sync-text').textContent=ok?'● live · syncs to all viewers in real time':'● reconnecting...';
+      document.getElementById('sync-text').style.color=ok?'':'var(--red)';
+    });
+    draftRef.on('value',snap=>{
+      const val=snap.val();
+      if(val){draft=val;selectedIdx=null;renderAll();}
+      else{draft=defaultDraft();saveToDB();}
+    });
+    fbReady=true;
+  }catch(e){
+    document.getElementById('sync-text').textContent='Firebase error — check config';
+    document.getElementById('sync-text').style.color='var(--red)';
+    draft=defaultDraft();renderAll();
+  }
+}
+
+async function saveToDB(){
+  if(!fbReady||!draftRef){renderAll();return;}
+  try{await draftRef.set(draft);}
+  catch(e){showToast('Save failed — check connection',false);}
+}
+
+function loadFromDB(){
+  if(!fbReady){renderAll();return;}
+  draftRef.once('value').then(snap=>{if(snap.val()){draft=snap.val();selectedIdx=null;renderAll();}});
+}
+
+function confirmPick(){
+  if(selectedIdx===null||isDone())return;
+  const info=getPickInfo(draft.cur),p=draft.players[selectedIdx];
+  if(p.tier!==info.tier){showToast('Must pick a '+info.tier+' player!',false);return;}
+  draft.players[selectedIdx]={...p,drafted:true};
+  draft.picks.push({...info,pi:selectedIdx,pName:p.name,pRole:p.role,pIpl:p.ipl||'—'});
+  draft.cur++; selectedIdx=null;
+  saveToDB(); showToast(p.name+' → '+draft.teams[info.teamIdx].name);
+}
+
+function skipPick(){
+  if(isDone())return;
+  const info=getPickInfo(draft.cur);
+  if(!confirm('Skip '+info.tier+' pick for '+draft.teams[info.teamIdx].name+'?'))return;
+  draft.picks.push({...info,pi:-1,pName:'— Skipped —',pRole:'',pIpl:''});
+  draft.cur++; selectedIdx=null; saveToDB(); showToast('Pick skipped',false);
+}
+
+function undoPick(){
+  if(!draft.picks.length){showToast('Nothing to undo',false);return;}
+  const last=draft.picks.pop();
+  if(last.pi>=0)draft.players[last.pi]={...draft.players[last.pi],drafted:false};
+  draft.cur=last.g; selectedIdx=null; saveToDB(); showToast('Last pick undone',false);
+}
+
+function selectPlayer(i){
+  if(isDone())return;
+  const p=draft.players[i]; if(p.drafted)return;
+  const info=getPickInfo(draft.cur);
+  if(p.tier!==info.tier){showToast('Need a '+info.tier+' player this turn',false);return;}
+  selectedIdx=(selectedIdx===i)?null:i; renderPool(); renderActionBar();
+}
+
+function addPlayer(){
+  const name=document.getElementById('np-name').value.trim();
+  if(!name){showToast('Enter a player name',false);return;}
+  draft.players.push({name,tier:document.getElementById('np-tier').value,role:document.getElementById('np-role').value,ipl:document.getElementById('np-ipl').value||'—',drafted:false});
+  document.getElementById('np-name').value=''; document.getElementById('np-ipl').value='';
+  saveToDB(); showToast(name+' added to pool');
+}
+
+function removePlayer(i){
+  if(draft.players[i].drafted){showToast('Cannot remove a drafted player',false);return;}
+  if(!confirm('Remove '+draft.players[i].name+'?'))return;
+  draft.players.splice(i,1); saveToDB();
+}
+
+function resetDraft(){
+  if(!confirm('Reset the ENTIRE draft? All picks will be permanently lost.'))return;
+  const teams=draft.teams; draft=defaultDraft(); draft.teams=teams; selectedIdx=null;
+  saveToDB(); showToast('Draft has been reset',false);
+}
+
+function exportCSV(){
+  if(!draft.picks.length){showToast('No picks yet',false);return;}
+  let csv='Round,Pick,Team,Owner,Tier,Player,Role,IPL Team\n';
+  draft.picks.forEach(pk=>{const t=draft.teams[pk.teamIdx];csv+=pk.round+1+','+( pk.p+1)+',"'+t.name+'","'+t.owner+'",'+pk.tier+',"'+pk.pName+'",'+pk.pRole+',"'+pk.pIpl+'"\n';});
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='IPL2026_Draft_Results.csv';a.click();
+  showToast('CSV exported');
+}
+
+function parseCSV(text){
+  const lines=text.trim().split('\n');
+  const header=lines[0].toLowerCase().split(',').map(h=>h.trim().replace(/"/g,''));
+  const ni=header.indexOf('name'),ti=header.indexOf('tier'),ri=header.indexOf('role'),ii=header.indexOf('ipl');
+  if(ni===-1||ti===-1)return null;
+  const validT=['PLATINUM','GOLD','SILVER','BRONZE'],validR=['BAT','BWL','AR','WK'];
+  const players=[];let skipped=0;
+  lines.slice(1).forEach(line=>{
+    if(!line.trim())return;
+    const cols=line.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
+    const name=(cols[ni]||'').trim(),tier=(cols[ti]||'').toUpperCase().trim();
+    const role=ri>=0?(cols[ri]||'BAT').toUpperCase().trim():'BAT';
+    const ipl=ii>=0?(cols[ii]||'—').trim():'—';
+    if(!name||!validT.includes(tier)){skipped++;return;}
+    players.push({name,tier,role:validR.includes(role)?role:'BAT',ipl,drafted:false});
+  });
+  return{players,skipped};
+}
+
+function applyImport(text){
+  const result=parseCSV(text);
+  if(!result){showToast('CSV must have name and tier columns',false);return;}
+  if(!result.players.length){showToast('No valid players found',false);return;}
+  const skip=result.skipped>0?' ('+result.skipped+' rows skipped)':'';
+  if(!confirm('Import '+result.players.length+' players?'+skip+'\n\nThis replaces the current player pool.'))return;
+  draft.players=result.players; saveToDB();
+  showToast('Imported '+result.players.length+' players'+(result.skipped>0?', '+result.skipped+' skipped':''));
+}
+
+function handleFileInput(input){
+  const file=input.files[0];if(!file)return;
+  const r=new FileReader();r.onload=e=>applyImport(e.target.result);r.readAsText(file);input.value='';
+}
+
+function handleDrop(e){
+  e.preventDefault();document.getElementById('import-zone').classList.remove('dragover');
+  const file=e.dataTransfer.files[0];if(!file)return;
+  const r=new FileReader();r.onload=ev=>applyImport(ev.target.result);r.readAsText(file);
+}
+
+function downloadTemplate(){
+  const csv='name,tier,role,ipl\nVirat Kohli,PLATINUM,BAT,RCB\nJasprit Bumrah,PLATINUM,BWL,MI\nYashasvi Jaiswal,GOLD,BAT,RR\nAxar Patel,GOLD,AR,DC\nArshdeep Singh,SILVER,BWL,PBKS\nRinku Singh,BRONZE,BAT,KKR';
+  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='player_pool_template.csv';a.click();
+  showToast('Template downloaded');
+}
+
+// ══════════════════════════════════════════════════════
+// AUTH — ADMIN / VIEWER
+// ══════════════════════════════════════════════════════
+let isAdmin = false;
+let loginRole = null;
+
+function selectRole(role){
+  loginRole = role;
+  document.getElementById('btn-role-viewer').classList.toggle('selected', role==='viewer');
+  document.getElementById('btn-role-admin').classList.toggle('selected', role==='admin');
+  document.getElementById('pw-section').style.display = role==='admin' ? 'block' : 'none';
+  document.getElementById('pw-error').style.display = 'none';
+  document.getElementById('login-go-btn').disabled = false;
+  if(role==='viewer') document.getElementById('login-go-btn').textContent = 'Watch Live →';
+  else { document.getElementById('login-go-btn').textContent = 'Enter as Admin →'; setTimeout(()=>document.getElementById('pw-input').focus(),50); }
+}
+
+function submitLogin(){
+  if(!loginRole) return;
+  if(loginRole==='admin'){
+    const pw = document.getElementById('pw-input').value;
+    if(pw !== ADMIN_PASSWORD){
+      document.getElementById('pw-error').style.display = 'block';
+      document.getElementById('pw-input').focus();
+      return;
+    }
+    isAdmin = true;
+    sessionStorage.setItem('ipl_role','admin');
+  } else {
+    isAdmin = false;
+    sessionStorage.setItem('ipl_role','viewer');
+  }
+  document.getElementById('login-overlay').style.display = 'none';
+  applyRole();
+}
+
+function applyRole(){
+  // Show/hide admin-only elements
+  document.querySelectorAll('.admin-only').forEach(el=>{
+    el.style.display = isAdmin ? '' : 'none';
+  });
+  // Viewer banner
+  document.getElementById('viewer-banner').style.display = isAdmin ? 'none' : 'block';
+  // Viewer pick note in action bar
+  const note = document.getElementById('viewer-pick-note');
+  if(note) note.style.display = isAdmin ? 'none' : 'block';
+  // Role badge in header
+  const badge = document.getElementById('role-badge');
+  if(badge){
+    badge.className = 'admin-badge ' + (isAdmin ? 'badge-admin' : 'badge-viewer');
+    badge.innerHTML = isAdmin ? '🔑 Admin <span style="font-size:10px;opacity:.7">· click to lock</span>' : '👁 Viewer <span style="font-size:10px;opacity:.7">· click to login</span>';
+  }
+  // Player cards — disable clicks for viewers
+  if(!isAdmin){
+    document.getElementById('player-grid').style.pointerEvents = 'none';
+    document.getElementById('player-grid').style.opacity = '0.85';
+  } else {
+    document.getElementById('player-grid').style.pointerEvents = '';
+    document.getElementById('player-grid').style.opacity = '';
+  }
+}
+
+function logoutRole(){
+  sessionStorage.removeItem('ipl_role');
+  loginRole = null;
+  isAdmin = false;
+  document.getElementById('pw-input') && (document.getElementById('pw-input').value = '');
+  document.getElementById('pw-error') && (document.getElementById('pw-error').style.display = 'none');
+  document.getElementById('btn-role-viewer').classList.remove('selected');
+  document.getElementById('btn-role-admin').classList.remove('selected');
+  document.getElementById('pw-section').style.display = 'none';
+  document.getElementById('login-go-btn').disabled = true;
+  document.getElementById('login-go-btn').textContent = 'Enter Draft →';
+  document.getElementById('login-overlay').style.display = 'flex';
+}
+
+function checkSavedRole(){
+  const saved = sessionStorage.getItem('ipl_role');
+  if(saved === 'admin'){ isAdmin = true; document.getElementById('login-overlay').style.display='none'; applyRole(); }
+  else if(saved === 'viewer'){ isAdmin = false; document.getElementById('login-overlay').style.display='none'; applyRole(); }
+  // else overlay stays visible
+}
+
+function renderAll(){
+  if(!draft)return;
+  updateHeader(); renderNowPicking(); renderPool(); renderActionBar();
+  renderPickLog(); renderDraftOrder(); renderRosters(); renderSetup();
+  autoFilterToCurrentTier();
+  applyRole();
+}
+
+function updateHeader(){
+  const done=isDone();
+  document.getElementById('h-round').textContent=done?'✓':`${getPickInfo(draft.cur).round+1}/11`;
+  document.getElementById('h-pick').textContent=done?'—':`${getPickInfo(draft.cur).p+1}/10`;
+  document.getElementById('h-drafted').textContent=`${draft.picks.filter(p=>p.pi>=0).length}/110`;
+}
+
+function renderNowPicking(){
+  const el=document.getElementById('now-picking');
+  if(isDone()){
+    el.style.cssText='background:rgba(34,197,94,0.07);border:1px solid rgba(34,197,94,0.25);border-radius:10px;padding:30px;text-align:center;margin-bottom:16px;display:block';
+    el.innerHTML='<div style="font-size:26px;font-weight:700;color:var(--green);margin-bottom:8px">🏆 Draft Complete!</div><div style="color:var(--muted)">All 110 picks made. Check Rosters tab for final squads.</div>';
+    return;
+  }
+  const info=getPickInfo(draft.cur),team=draft.teams[info.teamIdx];
+  el.style.cssText=`background:${TB[info.tier]};border:1px solid ${TC[info.tier]}55;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center`;
+  el.innerHTML=`<div><div class="np-label">Now picking</div><div class="np-team">${team.name}</div><div class="np-owner">${team.owner}</div></div>
+    <div style="text-align:center"><div style="font-size:11px;color:var(--muted);margin-bottom:8px">Round ${info.round+1} · Pick ${info.p+1}</div><div class="tier t-${info.tier} tier-lg">${info.tier[0]+info.tier.slice(1).toLowerCase()}</div><div style="font-size:11px;color:var(--muted);margin-top:8px">Pick #${draft.cur+1} of 110</div></div>
+    <div style="text-align:right"><div class="np-label">Required tier</div><div style="font-size:12px;color:var(--sub);margin-top:5px;line-height:1.65">Select a <span style="color:${TC[info.tier]};font-weight:600">${info.tier.toLowerCase()}</span> player and confirm.</div></div>`;
+}
+
+function renderPool(){
+  const grid=document.getElementById('player-grid');
+  const search=(document.getElementById('search-box')||{value:''}).value.toLowerCase();
+  const info=isDone()?null:getPickInfo(draft.cur);
+  grid.innerHTML=''; let avail=0;
+  draft.players.forEach((p,i)=>{
+    if(tierFilter!=='ALL'&&p.tier!==tierFilter)return;
+    if(search&&!p.name.toLowerCase().includes(search))return;
+    if(!p.drafted)avail++;
+    const d=document.createElement('div');
+    d.className='pc'+(p.drafted?' drafted':'')+(selectedIdx===i?' selected':'');
+    if(!p.drafted&&info&&p.tier===info.tier)d.style.boxShadow=`0 0 0 1px ${TC[p.tier]}44`;
+    d.innerHTML=`<div class="pc-tier" style="color:${TC[p.tier]}">${p.tier[0]+p.tier.slice(1).toLowerCase()}</div><div class="pc-name">${p.name}</div><div class="pc-meta">${p.role} · ${p.ipl}</div>${p.drafted?'<div class="drafted-tag">drafted</div>':''}`;
+    if(!p.drafted)d.addEventListener('click',()=>selectPlayer(i));
+    grid.appendChild(d);
+  });
+  document.getElementById('pool-avail').textContent=avail+' available';
+}
+
+function renderActionBar(){
+  const done=isDone();
+  document.getElementById('btn-confirm').disabled=selectedIdx===null||done;
+  document.getElementById('btn-skip').disabled=done;
+  const prev=document.getElementById('sel-preview');
+  if(selectedIdx!==null&&draft.players[selectedIdx]){
+    const p=draft.players[selectedIdx];
+    prev.style.display='block';prev.style.color=TC[p.tier];prev.style.background=TB[p.tier];prev.style.border=`1px solid ${TC[p.tier]}44`;
+    prev.textContent='Selected: '+p.name+' ('+p.tier+' · '+p.role+' · '+p.ipl+')';
+  } else { prev.style.display='none'; }
+}
+
+function renderPickLog(){
+  const log=document.getElementById('pick-log');
+  if(!draft.picks.length){log.style.display='none';return;}
+  log.style.display='block';
+  log.innerHTML=[...draft.picks].reverse().map((pk,i)=>`<div class="log-row">[R${pk.round+1}·P${pk.p+1}] <strong>${draft.teams[pk.teamIdx].name}</strong> ← <span style="color:${TC[pk.tier]};font-weight:600">${pk.pName}</span>${pk.pRole?' ('+pk.pRole+' · '+pk.pIpl+')':''}</div>`).join('');
+}
+
+function renderDraftOrder(){
+  const wrap=document.getElementById('order-wrap'); if(!wrap)return;
+  const done=isDone();
+  let html=`<table id="order-tbl"><thead><tr><th>Rd</th>${Array.from({length:10},(_,p)=>`<th>P${p+1}</th>`).join('')}</tr></thead><tbody>`;
+  for(let r=0;r<11;r++){
+    html+=`<tr><td style="padding:5px 7px;font-weight:600;color:var(--sub);border-bottom:1px solid rgba(255,255,255,0.04);white-space:nowrap">R${r+1}</td>`;
+    for(let p=0;p<10;p++){
+      const g=r*10+p,inf=getPickInfo(g),pick=draft.picks.find(x=>x.g===g);
+      const isCur=g===draft.cur&&!done,isDn=g<draft.cur;
+      html+=`<td style="padding:3px 3px;border-bottom:1px solid rgba(255,255,255,0.04)"><div class="pcell${isCur?' cur-cell':''}" style="background:${TB[inf.tier]};border:1px solid ${TC[inf.tier]}33;opacity:${isDn?0.4:1}"><div class="pcell-t${isDn?' done-cell':''}" style="color:${TC[inf.tier]}">${inf.tier[0]}</div><div class="pcell-n${isDn?' done-cell':''}">${draft.teams[inf.teamIdx].name.split(' ').pop()}</div>${pick&&pick.pi>=0?`<div class="pcell-p">✓${pick.pName.split(' ').pop()}</div>`:''}${pick&&pick.pi===-1?`<div style="font-size:9px;color:var(--red)">skip</div>`:''}</div></td>`;
+    }
+    html+=`</tr>`;
+  }
+  wrap.innerHTML=html+`</tbody></table>`;
+}
+
+function renderRosters(){
+  const grid=document.getElementById('rosters-grid'); if(!grid)return;
+  grid.innerHTML=draft.teams.map((team,ti)=>{
+    const tPicks=draft.picks.filter(pk=>pk.teamIdx===ti&&pk.pi>=0);
+    const tc=TEAM_COLORS[ti];
+    const rows=Array.from({length:11},(_,s)=>{
+      const pk=tPicks[s];
+      if(!pk)return`<div class="rc-row"><span class="rc-num">${s+1}</span><span></span><span class="rc-empty">empty</span></div>`;
+      return`<div class="rc-row"><span class="rc-num">${s+1}</span><span class="tdot" style="background:${TC[pk.tier]}"></span><span class="rc-name">${pk.pName}</span><span class="rc-role">${pk.pRole}</span><span class="rc-ipl" style="color:${tc};background:${tc}18">${pk.pIpl||'—'}</span></div>`;
+    }).join('');
+    const tiers=['PLATINUM','GOLD','SILVER','BRONZE'].map(t=>`<span style="font-size:10px;color:${tPicks.filter(pk=>pk.tier===t).length>0?TC[t]:'var(--border)'}">${t[0]}: <strong>${tPicks.filter(pk=>pk.tier===t).length}</strong></span>`).join('');
+    return`<div class="rc" style="border-color:${tc}33"><div class="rc-hdr" style="background:${tc}14;border-bottom-color:${tc}33"><div style="font-size:13px;font-weight:700;color:${tc}">${team.name}</div><div style="font-size:11px;color:var(--muted)">${tPicks.length}/11 · ${team.owner}</div></div><div class="rc-col-hdr"><span>#</span><span></span><span>Player</span><span style="text-align:center">Role</span><span style="text-align:center">IPL</span></div>${rows}<div class="rc-footer">${tiers}</div></div>`;
+  }).join('');
+}
+
+function renderSetup(){
+  const tg=document.getElementById('teams-grid'); if(!tg)return;
+  tg.innerHTML=draft.teams.map((t,i)=>`<div class="tc-card"><div style="font-size:10px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.1em">Team ${i+1}</div><input value="${t.name}" onblur="updateTeam(${i},'name',this.value)" style="width:100%;margin-bottom:5px"><input value="${t.owner}" onblur="updateTeam(${i},'owner',this.value)" placeholder="Owner name" style="width:100%;font-size:12px;color:var(--muted)"></div>`).join('');
+  document.getElementById('pool-count').textContent=draft.players.length;
+  document.getElementById('pool-list').innerHTML=['PLATINUM','GOLD','SILVER','BRONZE'].map(tier=>{
+    const ps=draft.players.map((p,i)=>({...p,i})).filter(p=>p.tier===tier);
+    if(!ps.length)return'';
+    return`<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:${TC[tier]};margin-bottom:6px">${tier} (${ps.filter(p=>!p.drafted).length}/${ps.length})</div><div>${ps.map(p=>`<span class="ptag" style="opacity:${p.drafted?0.4:1}"><span style="color:${TC[tier]}">${p.name}</span><span style="font-size:10px;color:var(--muted)">${p.role}·${p.ipl}</span>${p.drafted?'<span style="font-size:9px;color:var(--red)">✓</span>':`<button class="ptag-x" onclick="removePlayer(${p.i})">×</button>`}</span>`).join('')}</div></div>`;
+  }).join('');
+}
+
+function updateTeam(i,field,val){draft.teams[i][field]=val;saveToDB();}
+function setFilter(tier){
+  tierFilter=tier;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active',b.classList.contains('f-'+tier)));
+  renderPool();
+}
+function autoFilterToCurrentTier(){if(!isDone())setFilter(getPickInfo(draft.cur).tier);}
+function switchTab(btn){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.style.display='none');
+  btn.classList.add('active');
+  document.getElementById('tab-'+btn.dataset.tab).style.display='block';
+}
+
+let toastTimer;
+function showToast(msg,ok=true){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=ok?'var(--green)':'#1e1e1e';
+  t.style.color=ok?'#000':'var(--gold)';t.style.border=ok?'none':'1px solid rgba(240,165,0,0.3)';
+  t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+window.addEventListener('DOMContentLoaded', ()=>{ checkSavedRole(); initFirebase(); });
+</script>
+</body>
+</html>
